@@ -15,11 +15,13 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-export const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+export const APP_DISPLAY_NAME = isDevelopment ? "Cakefork (Dev)" : "Cakefork";
 export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
+// Kept in step with app/DesktopForkIdentity.ts by DesktopForkIdentity.test.ts;
+// this file is plain .mjs and cannot import the TypeScript source.
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-cakefork-dev"] : ["t3code-cakefork"];
 const LAUNCHER_VERSION = 15;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,

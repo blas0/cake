@@ -15,6 +15,10 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
+import {
+  legacyUserDataDirName as forkLegacyUserDataDirName,
+  userDataDirName as forkUserDataDirName,
+} from "./DesktopForkIdentity.ts";
 
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;
@@ -178,8 +182,8 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
-  const userDataDirName = isDevelopment ? "t3code-dev" : "t3code";
-  const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+  const userDataDirName = forkUserDataDirName(isDevelopment);
+  const legacyUserDataDirName = forkLegacyUserDataDirName(isDevelopment);
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
     "applications",

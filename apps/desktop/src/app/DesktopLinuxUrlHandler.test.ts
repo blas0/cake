@@ -10,6 +10,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLinuxUrlHandler from "./DesktopLinuxUrlHandler.ts";
+import { desktopScheme } from "./DesktopForkIdentity.ts";
 
 interface RecordedRegistration {
   readonly directories: string[];
@@ -167,11 +168,18 @@ describe("DesktopLinuxUrlHandler", () => {
         recorded.files[0]?.content,
         'Exec="/home/alice/Applications/T3-Code.AppImage" %U',
       );
-      assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/t3code;");
+      assert.include(
+        recorded.files[0]?.content,
+        `MimeType=x-scheme-handler/${desktopScheme(false)};`,
+      );
       assert.deepEqual(recorded.commands, [
         {
           command: "xdg-mime",
-          args: ["default", "t3code-url-handler.desktop", "x-scheme-handler/t3code"],
+          args: [
+            "default",
+            "t3code-url-handler.desktop",
+            `x-scheme-handler/${desktopScheme(false)}`,
+          ],
         },
       ]);
     });

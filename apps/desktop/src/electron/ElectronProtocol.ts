@@ -8,9 +8,11 @@ import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
 
+import { desktopScheme } from "../app/DesktopForkIdentity.ts";
+
 export const DESKTOP_HOST = "app";
-export const DESKTOP_PRODUCTION_SCHEME = "t3code";
-export const DESKTOP_DEVELOPMENT_SCHEME = "t3code-dev";
+export const DESKTOP_PRODUCTION_SCHEME = desktopScheme(false);
+export const DESKTOP_DEVELOPMENT_SCHEME = desktopScheme(true);
 
 export function getDesktopScheme(isDevelopment: boolean): string {
   return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;

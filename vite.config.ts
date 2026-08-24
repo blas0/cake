@@ -102,6 +102,17 @@ export default defineConfig({
       "eslint/no-restricted-imports": [
         "error",
         {
+          patterns: [
+            {
+              // Reaching across a package boundary by relative path compiles
+              // and works in dev, then breaks the day the package builds to
+              // dist — and it dodges the public-contract seam in the meantime.
+              // Four of these had accumulated in the cake repository layer.
+              group: ["**/packages/*/src/**"],
+              message:
+                "Import from the package entry point (e.g. @t3tools/contracts), not by relative path into its src.",
+            },
+          ],
           paths: [
             {
               name: "@t3tools/client-runtime",
