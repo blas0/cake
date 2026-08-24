@@ -14,21 +14,21 @@
 // It attaches to the app's OWN window over the debug port, inside the paired
 // Electron session, so the pairing gate that blocks a plain browser never
 // applies. Read-only apart from opening and closing the Create-a-Cake dialog.
-import { createRequire } from "node:module";
-import { readdirSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import * as NodeFS from "node:fs";
+import * as NodeModule from "node:module";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
-const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const root = NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)));
 
 // playwright-core is in the pnpm store as a transitive dependency; resolve it
 // without adding a direct dependency to any package.json.
 function resolvePlaywrightCore() {
-  const store = join(root, "node_modules", ".pnpm");
-  const entry = readdirSync(store).find((name) => name.startsWith("playwright-core@"));
+  const store = NodePath.join(root, "node_modules", ".pnpm");
+  const entry = NodeFS.readdirSync(store).find((name) => name.startsWith("playwright-core@"));
   if (!entry) throw new Error("playwright-core not found in the pnpm store");
-  return createRequire(import.meta.url)(
-    join(store, entry, "node_modules", "playwright-core", "index.js"),
+  return NodeModule.createRequire(import.meta.url)(
+    NodePath.join(store, entry, "node_modules", "playwright-core", "index.js"),
   );
 }
 
