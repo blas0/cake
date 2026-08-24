@@ -83,6 +83,7 @@ import { VcsStatusBroadcaster } from "../src/vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../src/git/GitWorkflowService.ts";
 import * as VcsProcess from "../src/vcs/VcsProcess.ts";
 import * as AgentAwarenessRelay from "../src/relay/AgentAwarenessRelay.ts";
+import { CakeScheduleReactor } from "../src/cakes/CakeScheduleReactor.ts";
 
 const decodeCodexSettings = Schema.decodeEffect(CodexSettings);
 
@@ -382,6 +383,9 @@ export const makeOrchestrationIntegrationHarness = (
           start: () => Effect.void,
         }),
       ),
+      // Stubbed like its neighbours above: this harness drives the engine
+      // directly, so a real schedule tick would only add a clock to it.
+      Layer.provideMerge(Layer.succeed(CakeScheduleReactor, { start: () => Effect.void })),
     );
     const layer = Layer.empty.pipe(
       Layer.provideMerge(runtimeServicesLayer),

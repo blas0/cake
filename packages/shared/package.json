@@ -226,6 +226,10 @@
     "./usageFormat": {
       "types": "./src/usageFormat.ts",
       "import": "./src/usageFormat.ts"
+    },
+    "./cakeSchedule": {
+      "types": "./src/cakeSchedule.ts",
+      "import": "./src/cakeSchedule.ts"
     }
   },
   "scripts": {

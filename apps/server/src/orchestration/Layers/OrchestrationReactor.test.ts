@@ -12,6 +12,18 @@ import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
+import { CakeScheduleReactor } from "../../cakes/CakeScheduleReactor.ts";
+
+/**
+ * Which long-running roots the server actually starts.
+ *
+ * This is the test the cake scheduler needed and did not have. Every part of it
+ * — the schedule maths, the tick, the run target, the run/turn join — was
+ * correct and covered for a release in which no cake ever fired, because the
+ * layer that turns the crank had no caller and nothing asserted that the server
+ * had one. A unit test of the tick cannot see that; only a test of the
+ * composition can.
+ */
 
 describe("OrchestrationReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<OrchestrationReactor, never> | null = null;
@@ -23,7 +35,7 @@ describe("OrchestrationReactor", () => {
     runtime = null;
   });
 
-  it("starts provider ingestion, provider command, checkpoint, and thread deletion reactors", async () => {
+  it("starts provider ingestion, provider command, checkpoint, thread deletion, awareness, and cake schedule reactors", async () => {
     const started: string[] = [];
 
     runtime = ManagedRuntime.make(
@@ -73,6 +85,14 @@ describe("OrchestrationReactor", () => {
             },
           }),
         ),
+        Layer.provideMerge(
+          Layer.succeed(CakeScheduleReactor, {
+            start: () => {
+              started.push("cake-schedule-reactor");
+              return Effect.void;
+            },
+          }),
+        ),
       ),
     );
 
@@ -86,6 +106,7 @@ describe("OrchestrationReactor", () => {
       "checkpoint-reactor",
       "thread-deletion-reactor",
       "agent-awareness-relay",
+      "cake-schedule-reactor",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -60,6 +61,9 @@ import {
   type TerminalMetadataStreamEvent,
   WS_METHODS,
   WsRpcGroup,
+  CakeId,
+  CakeNotFoundError,
+  CakeStorageError,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -133,7 +137,50 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
+import { nextRunAfter } from "@t3tools/shared/cakeSchedule";
+import { CakeRepository } from "./cakes/CakeRepository.ts";
+import { CakeRepositoryLive } from "./cakes/CakeRepositoryLive.ts";
+import { runCakeNow } from "./cakes/cakeRunNow.ts";
+import { makeCakeTurnStarterFactory } from "./cakes/cakeTurnStarter.ts";
+import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+
+/**
+ * Every cake handler's storage failure, as an answer rather than a death.
+ *
+ * These all used to end in `Effect.orDie`, so a repository failure killed the
+ * fiber instead of replying — the connection's problem rather than the
+ * caller's, with nothing on the wire to say why. Neighbouring handlers in this
+ * file already map their read failures into typed errors; this is the same move
+ * for cakes.
+ */
+/**
+ * A stored attachment row, as the wire describes it.
+ *
+ * The repository keeps thread ids and timestamps as plain strings, because that
+ * is what SQLite holds. The contract says `ThreadId` and `DateTimeUtc`, so the
+ * conversion happens here, once, at the boundary — rather than every client
+ * re-parsing an ISO string by hand and guessing what a malformed one means.
+ */
+const toWireAttachment = (row: {
+  readonly cakeId: CakeId;
+  readonly threadId: string;
+  readonly enabled: boolean;
+  readonly nextRunAt: string | null;
+  readonly attachedAt: string;
+}) => ({
+  cakeId: row.cakeId,
+  threadId: ThreadId.make(row.threadId),
+  enabled: row.enabled,
+  nextRunAt: row.nextRunAt === null ? null : DateTime.makeUnsafe(row.nextRunAt),
+  attachedAt: DateTime.makeUnsafe(row.attachedAt),
+});
+
+const asCakeStorageError = (message: string) =>
+  Effect.mapError(
+    (cause: unknown) =>
+      new CakeStorageError({ message, ...(cause === undefined ? {} : { cause }) }),
+  );
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const EDITOR_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -450,6 +497,7 @@ const makeWsRpcLayer = (
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
+      const cakeRepository = yield* CakeRepository;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
       yield* Effect.addFinalizer(() =>
         Ref.get(rpcClientIds).pipe(
@@ -1077,6 +1125,22 @@ const makeWsRpcLayer = (
             ),
           );
       };
+
+      /**
+       * A starter per run, not one for the server.
+       *
+       * `endSessionFirst` is an instruction from whoever asked for this
+       * particular run — the drop dialog's "stop the current agent" answer says
+       * true, the shelf's Start button and the scheduler say false — so it is a
+       * parameter of the factory rather than a field read off the cake. Held as
+       * a single shared starter it would be global, and the Start button would
+       * tear down the session of a thread somebody is working in.
+       *
+       * Built from the shared factory rather than here, because the scheduler
+       * needs the same starter and cannot reach into this closure. The copy
+       * that used to live here is the reason the scheduler was never wired.
+       */
+      const makeCakeTurnStarter = yield* makeCakeTurnStarterFactory;
 
       const loadServerConfig = Effect.gen(function* () {
         const keybindingsConfig = yield* keybindings.loadConfigState;
@@ -1713,6 +1777,116 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetBackgroundPolicy, backgroundPolicy.snapshot, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.cakesList]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.cakesList,
+            cakeRepository.list().pipe(asCakeStorageError("Could not read the cakes.")),
+            {
+              "rpc.aggregate": "cakes",
+            },
+          ),
+        [WS_METHODS.cakesUpsert]: ({ cake }) =>
+          observeRpcEffect(
+            WS_METHODS.cakesUpsert,
+            Effect.flatMap(nowIso, (timestamp) => cakeRepository.upsert(cake, timestamp)).pipe(
+              asCakeStorageError("Could not save the cake."),
+            ),
+            { "rpc.aggregate": "cakes" },
+          ),
+        [WS_METHODS.cakesDelete]: ({ cakeId }) =>
+          observeRpcEffect(
+            WS_METHODS.cakesDelete,
+            cakeRepository.remove(cakeId).pipe(asCakeStorageError("Could not delete the cake.")),
+            { "rpc.aggregate": "cakes" },
+          ),
+        [WS_METHODS.cakesAttach]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cakesAttach,
+            Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis;
+              const cake = yield* cakeRepository.getById(input.cakeId);
+              // Reachable from a client: deleted in one window, attached in
+              // another. Answered, not thrown.
+              if (Option.isNone(cake)) {
+                return yield* new CakeNotFoundError({ cakeId: input.cakeId });
+              }
+              const config = cake.value;
+              yield* cakeRepository.attach(
+                {
+                  ...input,
+                  nextRunAt: DateTime.formatIso(
+                    DateTime.makeUnsafe(nextRunAfter(config.schedule, now)),
+                  ),
+                },
+                DateTime.formatIso(DateTime.makeUnsafe(now)),
+              );
+            }).pipe(asCakeStorageError("Could not attach the cake.")),
+            { "rpc.aggregate": "cakes" },
+          ),
+        [WS_METHODS.cakesDetach]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cakesDetach,
+            cakeRepository.detach(input).pipe(asCakeStorageError("Could not detach the cake.")),
+            { "rpc.aggregate": "cakes" },
+          ),
+        [WS_METHODS.cakesSetEnabled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cakesSetEnabled,
+            cakeRepository.setEnabled(input).pipe(asCakeStorageError("Could not change the cake.")),
+            { "rpc.aggregate": "cakes" },
+          ),
+        [WS_METHODS.cakesRunNow]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cakesRunNow,
+            Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis;
+              yield* runCakeNow(
+                {
+                  cakeId: input.cakeId,
+                  threadId: input.threadId,
+                  // Absent means an ordinary run. The default lives here, on the
+                  // server, so a client that says nothing cannot end a session
+                  // somebody is working in.
+                  endSessionFirst: input.endSessionFirst === true,
+                },
+                { now, starterFor: makeCakeTurnStarter },
+              ).pipe(Effect.provideService(CakeRepository, cakeRepository));
+            }).pipe(asCakeStorageError("Could not start the cake.")),
+            { "rpc.aggregate": "cakes" },
+          ),
+        [WS_METHODS.cakesStop]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cakesStop,
+            Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis;
+              // Interrupting the thread is what halts the agent, and the client
+              // still does that. This is the other half: without it the run row
+              // keeps the `started` it was written with, and a stopped run is
+              // indistinguishable from one still going.
+              yield* cakeRepository.markRunStopped({
+                ...input,
+                stoppedAt: DateTime.formatIso(DateTime.makeUnsafe(now)),
+              });
+            }).pipe(asCakeStorageError("Could not stop the cake.")),
+            { "rpc.aggregate": "cakes" },
+          ),
+        [WS_METHODS.cakesListForThread]: ({ threadId }) =>
+          observeRpcEffect(
+            WS_METHODS.cakesListForThread,
+            cakeRepository.listAttachmentsForThread(threadId).pipe(
+              Effect.map((rows) => rows.map(toWireAttachment)),
+              asCakeStorageError("Could not read this thread's cakes."),
+            ),
+            { "rpc.aggregate": "cakes" },
+          ),
+        [WS_METHODS.cakesActiveForThread]: ({ threadId }) =>
+          observeRpcEffect(
+            WS_METHODS.cakesActiveForThread,
+            cakeRepository
+              .activeCakeIdForThread(threadId)
+              .pipe(asCakeStorageError("Could not read this thread's running cake.")),
+            { "rpc.aggregate": "cakes" },
+          ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.cloudGetRelayClientStatus, relayClient.resolve, {
             "rpc.aggregate": "cloud",
@@ -2440,6 +2614,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         }).pipe(
           Effect.provide(
             makeWsRpcLayer(session, clientOrigin, previewAutomationBroker).pipe(
+              Layer.provide(CakeRepositoryLive),
+              Layer.provide(SqlitePersistenceLayerLive),
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),

@@ -3,6 +3,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
+  desktopRendererOrigins,
 } from "@t3tools/contracts";
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
@@ -47,7 +48,13 @@ import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./ht
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
+/**
+ * Derived from the shared scheme rather than written out. These two strings
+ * have to match the scheme the renderer loads under exactly; when the fork
+ * renamed the scheme and this list kept upstream's, every request the app made
+ * was refused at the CORS preflight.
+ */
+const DESKTOP_RENDERER_ORIGINS = desktopRendererOrigins();
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
 export function assetResponseHeaders(filePath: string): Record<string, string> {

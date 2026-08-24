@@ -204,7 +204,20 @@ import {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import { ThreadId } from "./baseSchemas.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  CakeAttachInput,
+  CakeDeleteInput,
+  CakeDetachInput,
+  CakeNotFoundError,
+  CakeRunNowInput,
+  CakeSetEnabledInput,
+  CakeStopInput,
+  CakeStorageError,
+  CakeUpsertInput,
+} from "./cakeRpc.ts";
+import { CakeConfig, CakeId } from "./cakes.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -238,6 +251,18 @@ export const WS_METHODS = {
   vcsCreateRef: "vcs.createRef",
   vcsSwitchRef: "vcs.switchRef",
   vcsInit: "vcs.init",
+
+  // Cake methods
+  cakesList: "cakes.list",
+  cakesUpsert: "cakes.upsert",
+  cakesDelete: "cakes.delete",
+  cakesAttach: "cakes.attach",
+  cakesDetach: "cakes.detach",
+  cakesSetEnabled: "cakes.setEnabled",
+  cakesRunNow: "cakes.runNow",
+  cakesStop: "cakes.stop",
+  cakesListForThread: "cakes.listForThread",
+  cakesActiveForThread: "cakes.activeForThread",
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
@@ -486,6 +511,100 @@ export const WsServerGetBackgroundPolicyRpc = Rpc.make(WS_METHODS.serverGetBackg
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
   error: EnvironmentAuthorizationError,
+});
+
+/**
+ * A cake attached to a thread, as a client reads it back.
+ *
+ * `ThreadId` and `DateTimeUtc` rather than bare strings. The cake lane was the
+ * only place in this file's RPC surface still passing a thread id as
+ * `Schema.String`, which meant the one feature that starts unattended agents
+ * was also the one opting out of the brand everything else relies on — and its
+ * timestamps were the only ones a caller had to re-parse by hand.
+ */
+const CakeAttachment = Schema.Struct({
+  cakeId: CakeId,
+  threadId: ThreadId,
+  enabled: Schema.Boolean,
+  nextRunAt: Schema.NullOr(Schema.DateTimeUtc),
+  attachedAt: Schema.DateTimeUtc,
+});
+
+export const WsCakesListRpc = Rpc.make(WS_METHODS.cakesList, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(CakeConfig),
+  error: Schema.Union([CakeStorageError, EnvironmentAuthorizationError]),
+});
+
+export const WsCakesUpsertRpc = Rpc.make(WS_METHODS.cakesUpsert, {
+  payload: CakeUpsertInput,
+  success: Schema.Void,
+  error: Schema.Union([CakeNotFoundError, CakeStorageError, EnvironmentAuthorizationError]),
+});
+
+export const WsCakesDeleteRpc = Rpc.make(WS_METHODS.cakesDelete, {
+  payload: CakeDeleteInput,
+  success: Schema.Void,
+  error: Schema.Union([CakeNotFoundError, CakeStorageError, EnvironmentAuthorizationError]),
+});
+
+export const WsCakesAttachRpc = Rpc.make(WS_METHODS.cakesAttach, {
+  payload: CakeAttachInput,
+  success: Schema.Void,
+  error: Schema.Union([CakeNotFoundError, CakeStorageError, EnvironmentAuthorizationError]),
+});
+
+export const WsCakesDetachRpc = Rpc.make(WS_METHODS.cakesDetach, {
+  payload: CakeDetachInput,
+  success: Schema.Void,
+  error: Schema.Union([CakeNotFoundError, CakeStorageError, EnvironmentAuthorizationError]),
+});
+
+export const WsCakesSetEnabledRpc = Rpc.make(WS_METHODS.cakesSetEnabled, {
+  payload: CakeSetEnabledInput,
+  success: Schema.Void,
+  error: Schema.Union([CakeNotFoundError, CakeStorageError, EnvironmentAuthorizationError]),
+});
+
+export const WsCakesRunNowRpc = Rpc.make(WS_METHODS.cakesRunNow, {
+  payload: CakeRunNowInput,
+  success: Schema.Void,
+  error: Schema.Union([CakeNotFoundError, CakeStorageError, EnvironmentAuthorizationError]),
+});
+
+/**
+ * The end of a run, written down.
+ *
+ * Interrupting the thread halts the agent but says nothing about the run: the
+ * row keeps the `started` it was written with, so a run that was stopped, one
+ * that is still going and one whose server died all read alike afterwards. This
+ * is the only thing that closes a run, which is why the button calls it as well
+ * as interrupting rather than instead of.
+ */
+export const WsCakesStopRpc = Rpc.make(WS_METHODS.cakesStop, {
+  payload: CakeStopInput,
+  success: Schema.Void,
+  error: Schema.Union([CakeNotFoundError, CakeStorageError, EnvironmentAuthorizationError]),
+});
+
+export const WsCakesListForThreadRpc = Rpc.make(WS_METHODS.cakesListForThread, {
+  payload: Schema.Struct({ threadId: ThreadId }),
+  success: Schema.Array(CakeAttachment),
+  error: Schema.Union([CakeStorageError, EnvironmentAuthorizationError]),
+});
+
+/**
+ * Which cake, if any, owns the turn a thread is currently running.
+ *
+ * Resolved on the server and answered as a bare cake id, because the match
+ * itself needs turn identity a client has no reason to hold. Without it the
+ * only run a client could recognise was one it started itself — which is never
+ * the scheduled run, and scheduled is how cakes normally run.
+ */
+export const WsCakesActiveForThreadRpc = Rpc.make(WS_METHODS.cakesActiveForThread, {
+  payload: Schema.Struct({ threadId: ThreadId }),
+  success: Schema.NullOr(CakeId),
+  error: Schema.Union([CakeStorageError, EnvironmentAuthorizationError]),
 });
 
 const PullRequestRpcError = Schema.Union([
@@ -1039,6 +1158,16 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,
+  WsCakesListRpc,
+  WsCakesUpsertRpc,
+  WsCakesDeleteRpc,
+  WsCakesAttachRpc,
+  WsCakesDetachRpc,
+  WsCakesSetEnabledRpc,
+  WsCakesRunNowRpc,
+  WsCakesStopRpc,
+  WsCakesListForThreadRpc,
+  WsCakesActiveForThreadRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

@@ -50,6 +50,19 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.serverReportHostPowerState]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverGetBackgroundPolicy]: AuthOrchestrationReadScope,
+  // The three cake reads take the read scope, like every other read in this
+  // table. They were all given the operate scope together, which left a
+  // read-scoped client able to inspect everything in the app except cakes.
+  [WS_METHODS.cakesList]: AuthOrchestrationReadScope,
+  [WS_METHODS.cakesUpsert]: AuthOrchestrationOperateScope,
+  [WS_METHODS.cakesDelete]: AuthOrchestrationOperateScope,
+  [WS_METHODS.cakesAttach]: AuthOrchestrationOperateScope,
+  [WS_METHODS.cakesDetach]: AuthOrchestrationOperateScope,
+  [WS_METHODS.cakesSetEnabled]: AuthOrchestrationOperateScope,
+  [WS_METHODS.cakesRunNow]: AuthOrchestrationOperateScope,
+  [WS_METHODS.cakesStop]: AuthOrchestrationOperateScope,
+  [WS_METHODS.cakesListForThread]: AuthOrchestrationReadScope,
+  [WS_METHODS.cakesActiveForThread]: AuthOrchestrationReadScope,
   [WS_METHODS.cloudGetRelayClientStatus]: AuthRelayReadScope,
   [WS_METHODS.cloudInstallRelayClient]: AuthRelayWriteScope,
   [WS_METHODS.pullRequestsList]: AuthOrchestrationReadScope,
