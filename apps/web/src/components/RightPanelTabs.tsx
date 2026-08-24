@@ -2,6 +2,7 @@ import type { ContextMenuItem, PreviewSessionSnapshot, PullRequestState } from "
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
   Bot,
+  CakeIcon,
   FileDiff,
   Files,
   GitPullRequest,
@@ -74,12 +75,18 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  /**
+   * Optional, unlike its neighbours: the pull-request page mounts this panel
+   * with no thread behind it, and a cake has nowhere to attach without one.
+   */
+  onAddCakes?: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
+  cakesAvailable?: boolean;
   pullRequestStatuses?: Readonly<Record<string, PullRequestTabStatus>>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
@@ -101,6 +108,7 @@ const SURFACE_DISABLED_REASONS = {
   diff: "Diff is only available for server threads in Git repositories.",
   pullRequest: "This thread's branch has no pull request yet.",
   agents: "Agents are only available from a thread.",
+  cakes: "Cakes are only available from a thread.",
 } as const;
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -123,7 +131,10 @@ const SURFACE_UNAVAILABLE_HINTS = {
   diff: "Available for Git repositories.",
   pullRequest: "No pull request on this branch yet.",
   agents: "Available from a thread.",
+  cakes: "Available from a thread.",
 } as const;
+
+const noSurfaceToAdd = () => undefined;
 
 type TabContextMenuAction =
   | "copy-path"
@@ -252,12 +263,14 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  onAddCakes: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
+  cakesAvailable: boolean;
   liveAgentCount: number;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
@@ -323,6 +336,16 @@ function RightPanelEmptyState(props: {
       disabledReason: SURFACE_UNAVAILABLE_HINTS.agents,
       onClick: props.onAddAgents,
       badgeCount: props.liveAgentCount,
+    },
+    {
+      label: "Cakes",
+      description: "Drag a saved agent loop onto this thread.",
+      icon: CakeIcon,
+      shortcut: "C",
+      available: props.cakesAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.cakes,
+      onClick: props.onAddCakes,
+      badgeCount: 0,
     },
   ] as const;
 
@@ -508,6 +531,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "agents":
       return "Agents";
+    case "cakes":
+      return "Cakes";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -593,6 +618,8 @@ function SurfaceIcon({
     }
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "cakes":
+      return <CakeIcon className="size-3 shrink-0" />;
   }
 }
 
@@ -650,6 +677,17 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.agentsAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.agents,
       onClick: props.onAddAgents,
+    },
+    // One entry in upstream's list rather than a hand-written item beside it.
+    // Upstream made the add-surface menu data-driven after this fork began,
+    // and the shortcut handling comes with the shape for free.
+    {
+      label: "Cakes",
+      icon: CakeIcon,
+      shortcut: "C",
+      available: props.cakesAvailable ?? false,
+      disabledReason: SURFACE_DISABLED_REASONS.cakes,
+      onClick: props.onAddCakes ?? noSurfaceToAdd,
     },
   ] as const;
 
@@ -938,12 +976,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddAgents={props.onAddAgents}
+            onAddCakes={props.onAddCakes ?? noSurfaceToAdd}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
             pullRequestAvailable={props.pullRequestAvailable}
             agentsAvailable={props.agentsAvailable}
+            cakesAvailable={props.cakesAvailable ?? false}
             liveAgentCount={props.liveAgentCount}
           />
         ) : (

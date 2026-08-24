@@ -150,6 +150,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --animate-status-pulse: status-pulse 2s infinite;
   --animate-ghost-pulse: ghost-pulse 2.4s infinite;
   --animate-status-ping: status-ping 2s infinite;
+  --animate-cake-glimmer: cake-glimmer 2.8s infinite linear;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-warning-surface: var(--warning-surface);
@@ -250,6 +251,46 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       opacity: 1;
     }
   }
+  @keyframes cake-glimmer {
+    /* A cake's label while it is live: one highlight band travelling across the
+       text, continuously.
+
+       Not duty-cycled like the indicators above, and that is a deliberate
+       departure. Those hold a *state* — full opacity, then dimmed — so a long
+       pause between changes is invisible. A sweep holds a *position*, so the
+       same trick parks the band off the end and the label simply stops moving.
+       The first version swept in 1.44s and then sat still for 1.76s before
+       snapping back, which read as the animation lagging rather than resting.
+
+       Two honest caveats, because the neighbours above earn their comments and
+       this one should not claim more than it does.
+
+       This is a paint animation, not a compositor one. `background-position` is
+       not compositable, and with `background-clip: text` each frame re-renders
+       the glyphs as a mask for the gradient — so unlike `skeleton`, which moves
+       a band with `transform` precisely to stay off the main thread, this costs
+       a repaint per frame. The earlier version of this comment claimed the
+       compositor; it was wrong.
+
+       It is kept anyway because the cost was measured rather than assumed:
+       twelve of these animating at once moved neither the median frame time
+       (16.7ms) nor the p95 (17.5ms), and the runs without them dropped as many
+       frames as the runs with them. A picker shows a handful of rows. The
+       `transform` alternative is cheaper and available — it is what `skeleton`
+       does — but it sweeps a rectangle, which lights the spaces between words
+       as brightly as the words, and that is the thing `background-clip: text`
+       is here to avoid. If this list ever grows long enough to matter, that
+       trade is the one to revisit.
+
+       Both ends of the gradient are flat `--foreground`, so the wrap from one
+       cycle to the next lands on identical paint and cannot be seen. */
+    from {
+      background-position: 200% 50%;
+    }
+    to {
+      background-position: -100% 50%;
+    }
+  }
   @keyframes status-ping {
     /* Burst first (immediate feedback for click ripples), then hold
        invisible for the rest of the cycle. Mirrors animate-ping's
@@ -264,6 +305,39 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       opacity: 0;
       scale: 2;
     }
+  }
+}
+
+@utility cake-glimmer {
+  /* Text that reads as alive without becoming a second status indicator.
+     The label keeps its own colour and a lighter band crosses it, so a running
+     cake is legible at rest — an opacity pulse would make the name harder to
+     read at exactly the moment it matters most.
+
+     `background-clip: text` rather than an overlay, because the band has to
+     follow the glyphs: a rectangle sweeping a row of text lights the spaces
+     between words as brightly as the words. */
+  background-image: linear-gradient(
+    100deg,
+    var(--foreground) 0%,
+    var(--foreground) 38%,
+    color-mix(in srgb, var(--foreground) 35%, var(--background)) 50%,
+    var(--foreground) 62%,
+    var(--foreground) 100%
+  );
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: var(--animate-cake-glimmer);
+
+  /* Motion is the whole mechanism here, so there is no reduced version to fall
+     back to — it simply stops, and the label is left in its ordinary colour.
+     Nothing else on the row depends on the animation to say what it says. */
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    background-image: none;
+    color: var(--foreground);
   }
 }
 

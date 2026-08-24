@@ -1,24 +1,36 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
-import { EllipsisIcon } from "lucide-react";
+import { EllipsisIcon, OctagonXIcon } from "lucide-react";
+import { runningCakeEntry } from "../cakes/cakeThreadModel";
 import { Button } from "../ui/button";
 import {
   Menu,
+  MenuCheckboxItem,
+  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
   MenuSeparator as MenuDivider,
   MenuTrigger,
 } from "../ui/menu";
+import { COMPOSER_CAKE_STATUS_LABEL, type ComposerCakesModel } from "./ComposerCakeControls";
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
+  /**
+   * Null when no cake is attached to this thread. The narrow footer hides the
+   * two cake controls behind this menu, so leaving them out here would make
+   * the feature unreachable on a small viewport rather than merely cramped.
+   */
+  cakes: ComposerCakesModel | null;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
+  const cakesModel = props.cakes !== null && props.cakes.entries.length > 0 ? props.cakes : null;
+  const stoppableCake = cakesModel === null ? null : runningCakeEntry(cakesModel.entries);
   return (
     <Menu>
       <MenuTrigger
@@ -69,6 +81,35 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           <MenuRadioItem value="auto">Auto</MenuRadioItem>
           <MenuRadioItem value="full-access">Full access</MenuRadioItem>
         </MenuRadioGroup>
+        {cakesModel === null ? null : (
+          <>
+            <MenuDivider />
+            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Cakes</div>
+            {cakesModel.entries.map((entry) => (
+              <MenuCheckboxItem
+                key={entry.cakeId}
+                variant="switch"
+                checked={entry.enabled}
+                onCheckedChange={(checked) => {
+                  cakesModel.onSetCakeEnabled(entry.cakeId, checked);
+                }}
+              >
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate">{entry.name}</span>
+                  <span className="text-muted-foreground text-xs leading-4">
+                    {COMPOSER_CAKE_STATUS_LABEL[entry.status]}
+                  </span>
+                </span>
+              </MenuCheckboxItem>
+            ))}
+            {stoppableCake === null ? null : (
+              <MenuItem variant="destructive" onClick={cakesModel.onStopCake}>
+                <OctagonXIcon />
+                Stop Cake
+              </MenuItem>
+            )}
+          </>
+        )}
       </MenuPopup>
     </Menu>
   );

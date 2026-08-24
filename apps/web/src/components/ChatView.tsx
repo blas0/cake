@@ -1,5 +1,6 @@
 import {
   type ApprovalRequestId,
+  CakeId,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -13,7 +14,7 @@ import {
   type ServerProvider,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
-  type ThreadId,
+  ThreadId,
   type TurnId,
   type KeybindingCommand,
   OrchestrationThreadActivity,
@@ -58,6 +59,7 @@ import {
   nextTerminalId,
   resolveTerminalSessionLabel,
 } from "@t3tools/shared/terminalLabels";
+import * as DateTime from "effect/DateTime";
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -166,6 +168,19 @@ import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs, type PullRequestTabStatus } from "./RightPanelTabs";
 import { AgentsPanel } from "./AgentsPanel";
+import { CakesPanel } from "./cakes/CakesPanel";
+import { CakeDropDialog } from "./cakes/CakeDropDialog";
+import { CakeDropSurface } from "./cakes/CakeDropSurface";
+import { makeCakeDropHandlers } from "./cakes/cakeDropHandlers";
+import type { CakeDropDecision } from "./cakes/cakeDropDecision";
+import {
+  cakeStopRequest,
+  deriveCakeThreadEntries,
+  forkedCakeThreadTitle,
+  resolveRunningCakeId,
+  type CakeShelfModel,
+} from "./cakes/cakeThreadModel";
+import type { ComposerCakesModel } from "./chat/ComposerCakeControls";
 import {
   deriveAgentPanelModel,
   foldSubagentActivities,
@@ -246,6 +261,7 @@ import { environmentCatalog } from "../connection/catalog";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { projectEnvironment } from "../state/projects";
+import { cakeThreadEnvironment, cakesEnvironment } from "../state/cakes";
 import { useEnvironmentQuery } from "../state/query";
 import {
   primaryServerAvailableEditorsAtom,
@@ -331,6 +347,7 @@ import {
   shouldReleaseTimelineAnchorForToolActivity,
   shouldShowBranchMismatchBanner,
   getStartedThreadModelChangeBlockReason,
+  threadHasStarted,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
   type LocalDispatchSnapshot,
@@ -1243,6 +1260,27 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
 ): T {
   return current.messageId === null ? current : { ...current, messageId: null };
 }
+
+/**
+ * What attaching a cake to a thread should do next.
+ *
+ * A union rather than two optional flags so the one caller that tears a session
+ * down has to say so, and so no caller that merely attaches can say it by
+ * accident: `endSessionFirst` only exists on the branch that actually starts a
+ * run, because ending a session and then starting nothing is a thread emptied
+ * for no reason.
+ */
+type CakeAttachRunOption =
+  | { readonly run: false }
+  | {
+      readonly run: true;
+      /**
+       * Ends the thread's provider session before the cake's turn, server-side
+       * and in that order. True only for the drop dialog's "stop the current
+       * agent, and spawn the cake" answer.
+       */
+      readonly endSessionFirst: boolean;
+    };
 
 function ChatViewContent(props: ChatViewProps) {
   const {
@@ -3400,6 +3438,10 @@ function ChatViewContent(props: ChatViewProps) {
   const addAgentsSurface = useCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
+  }, [activeThreadRef]);
+  const addCakesSurface = useCallback(() => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "cakes");
   }, [activeThreadRef]);
   const openFileSurface = useCallback(
     (relativePath: string) => {
@@ -6275,6 +6317,392 @@ function ChatViewContent(props: ChatViewProps) {
     composerRef,
   ]);
 
+  // ------------------------------------------------------------------------
+  // Cakes on this thread
+  // ------------------------------------------------------------------------
+
+  // Memoized because this component re-renders on every token of a streaming
+  // turn, and an atom rebuilt per render is a subscription rebuilt per render.
+  const cakeCatalog = useEnvironmentQuery(
+    useMemo(() => cakesEnvironment.list({ environmentId, input: {} }), [environmentId]),
+  );
+  const cakeAttachments = useEnvironmentQuery(
+    useMemo(
+      () =>
+        activeThreadId === null || !isServerThread
+          ? null
+          : cakeThreadEnvironment.listForThread({
+              environmentId,
+              input: { threadId: activeThreadId },
+            }),
+      [activeThreadId, environmentId, isServerThread],
+    ),
+  );
+  // The server's own answer to "is a cake running here", which is the only
+  // source that can see a run the scheduler started rather than this browser.
+  const activeCakeOnThread = useEnvironmentQuery(
+    useMemo(
+      () =>
+        activeThreadId === null || !isServerThread
+          ? null
+          : cakeThreadEnvironment.activeForThread({
+              environmentId,
+              input: { threadId: activeThreadId },
+            }),
+      [activeThreadId, environmentId, isServerThread],
+    ),
+  );
+  const attachCake = useAtomCommand(cakeThreadEnvironment.attach, { reportFailure: false });
+  const setCakeEnabled = useAtomCommand(cakeThreadEnvironment.setEnabled, {
+    reportFailure: false,
+  });
+  const runCakeNow = useAtomCommand(cakeThreadEnvironment.runNow, { reportFailure: false });
+  const stopCake = useAtomCommand(cakeThreadEnvironment.stop, { reportFailure: false });
+
+  /**
+   * The cake this client fired, and the thread it fired it on.
+   *
+   * Kept alongside the server's answer, not replaced by it: the round-trip
+   * lands a moment after the click, and the Stop Cake control should be there
+   * for the run the user just started rather than a beat later. The server's
+   * answer takes precedence once it arrives, because this record is an intent
+   * and can outlive the run it describes.
+   */
+  const [pendingCakeRun, setPendingCakeRun] = useState<{
+    threadId: string;
+    cakeId: string;
+  } | null>(null);
+  const [cakeDropAsk, setCakeDropAsk] = useState<Extract<
+    CakeDropDecision,
+    { kind: "ask" | "ask-start" }
+  > | null>(null);
+  const [isCakeDragActive, setIsCakeDragActive] = useState(false);
+
+  const refreshCakeAttachments = cakeAttachments.refresh;
+
+  // A scheduled run announces itself only by the thread turning busy, so that
+  // transition is when the server is worth asking again. Without this the
+  // answer would be whatever was true when the thread was opened.
+  //
+  // The attachments are re-read on the same transition, because a run that
+  // starts here has just consumed a slot and moved "Next run" on. Their own
+  // poll would get there within a tick anyway; this is what makes the label
+  // change at the moment the run visibly begins rather than up to half a
+  // minute afterwards.
+  const refreshActiveCakeOnThread = activeCakeOnThread.refresh;
+  useEffect(() => {
+    refreshActiveCakeOnThread();
+    refreshCakeAttachments();
+  }, [isWorking, refreshActiveCakeOnThread, refreshCakeAttachments]);
+
+  // Cake writes start unattended agents, so a failure the user never sees is
+  // the worst outcome: they believe the loop is attached and it is not.
+  const reportCakeFailure = useCallback(
+    (title: string, result: AtomCommandResult<unknown, unknown>): boolean => {
+      if (result._tag !== "Failure") return false;
+      if (isAtomCommandInterrupted(result)) return true;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title,
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+      return true;
+    },
+    [],
+  );
+
+  const attachCakeToThread = useCallback(
+    async (cakeId: string, threadId: string, options: CakeAttachRunOption) => {
+      const input = { cakeId: CakeId.make(cakeId), threadId: ThreadId.make(threadId) };
+      const attachResult = await attachCake({ environmentId, input });
+      if (reportCakeFailure("Could not attach the cake", attachResult)) return false;
+      if (options.run) {
+        const runResult = await runCakeNow({
+          environmentId,
+          input: { ...input, endSessionFirst: options.endSessionFirst },
+        });
+        if (reportCakeFailure("Could not start the cake", runResult)) return false;
+        setPendingCakeRun({ threadId, cakeId });
+      }
+      refreshCakeAttachments();
+      return true;
+    },
+    [attachCake, environmentId, refreshCakeAttachments, reportCakeFailure, runCakeNow],
+  );
+
+  const handleCakeDropDecision = useCallback(
+    (decision: Exclude<CakeDropDecision, { kind: "ignore" }>) => {
+      // A drop on a started, idle thread attaches and lets the schedule fire it.
+      // Every path that starts work immediately asks first.
+      if (decision.kind === "attach") {
+        void attachCakeToThread(decision.cakeId, decision.threadId, { run: false });
+        return;
+      }
+      setCakeDropAsk(decision);
+    },
+    [attachCakeToThread],
+  );
+
+  // Read at drop time, not at mount: a turn can start while the drag is in the air.
+  const readCakeDropThread = useCallback(
+    () => ({
+      threadId: isServerThread ? activeThreadId : null,
+      threadHasStarted: threadHasStarted(activeThread),
+      threadIsBusy: isWorking,
+    }),
+    [activeThread, activeThreadId, isServerThread, isWorking],
+  );
+
+  const cakeDropHandlers = useMemo(
+    () =>
+      makeCakeDropHandlers({
+        readThread: readCakeDropThread,
+        setDragActive: setIsCakeDragActive,
+        onDecision: handleCakeDropDecision,
+      }),
+    [handleCakeDropDecision, readCakeDropThread],
+  );
+
+  const runningCakeId = resolveRunningCakeId({
+    serverCakeId: activeCakeOnThread.data ?? null,
+    pending: pendingCakeRun,
+    threadId: activeThreadId,
+    threadIsBusy: isWorking,
+  });
+  const cakeEntries = useMemo(
+    () =>
+      deriveCakeThreadEntries({
+        cakes: cakeCatalog.data ?? [],
+        attachments: cakeAttachments.data ?? [],
+        runningCakeId,
+      }),
+    [cakeAttachments.data, cakeCatalog.data, runningCakeId],
+  );
+
+  // `onInterrupt` is rebuilt every render, so holding it behind a ref is what
+  // keeps the composer's cake model stable enough for its memo to hold.
+  const stopCakeRef = useRef<() => void>(() => {});
+  stopCakeRef.current = () => {
+    setPendingCakeRun(null);
+    // The interrupt is what actually halts the agent, so it goes first and goes
+    // regardless. The RPC only closes the run row; a run left open would make a
+    // stopped cake read as one still going for the rest of its history.
+    void onInterrupt();
+    const stopRequest = cakeStopRequest({ runningCakeId, threadId: activeThreadId });
+    if (stopRequest === null) return;
+    void stopCake({
+      environmentId,
+      input: {
+        cakeId: CakeId.make(stopRequest.cakeId),
+        threadId: ThreadId.make(stopRequest.threadId),
+      },
+    });
+  };
+  const onStopCake = useCallback(() => {
+    stopCakeRef.current();
+  }, []);
+
+  const onSetCakeEnabled = useCallback(
+    async (cakeId: string, enabled: boolean) => {
+      if (activeThreadId === null) return;
+      const result = await setCakeEnabled({
+        environmentId,
+        input: { cakeId: CakeId.make(cakeId), threadId: activeThreadId, enabled },
+      });
+      if (reportCakeFailure("Could not update the cake", result)) return;
+      refreshCakeAttachments();
+    },
+    [activeThreadId, environmentId, refreshCakeAttachments, reportCakeFailure, setCakeEnabled],
+  );
+
+  /**
+   * The shelf lists every cake on the environment, including ones this thread
+   * has never run, so enabling one can arrive before there is an attachment to
+   * enable. The attach comes first in that case — the same call the drop
+   * gesture makes, without the run. Disabling something never attached is
+   * already true and does nothing.
+   */
+  const onShelfSetCakeEnabled = useCallback(
+    async (cakeId: string, enabled: boolean) => {
+      if (activeThreadId === null) return;
+      const attached = (cakeAttachments.data ?? []).some(
+        (attachment) => attachment.cakeId === cakeId,
+      );
+      if (!attached) {
+        if (!enabled) return;
+        const didAttach = await attachCakeToThread(cakeId, activeThreadId, { run: false });
+        if (!didAttach) return;
+      }
+      await onSetCakeEnabled(cakeId, enabled);
+    },
+    [activeThreadId, attachCakeToThread, cakeAttachments.data, onSetCakeEnabled],
+  );
+
+  const cakeShelf: CakeShelfModel | null = useMemo(
+    () =>
+      activeThreadId === null
+        ? null
+        : {
+            attachments: cakeAttachments.data ?? [],
+            runningCakeId,
+            onRunNow: (cakeId: string) => {
+              // The shelf's Start button is an ordinary run. It must leave the
+              // thread's session alone: the person pressing it did not ask for
+              // whatever is running there to be torn down.
+              void attachCakeToThread(cakeId, activeThreadId, {
+                run: true,
+                endSessionFirst: false,
+              });
+            },
+            onStop: onStopCake,
+            onSetEnabled: (cakeId: string, enabled: boolean) => {
+              void onShelfSetCakeEnabled(cakeId, enabled);
+            },
+          },
+    [
+      activeThreadId,
+      attachCakeToThread,
+      cakeAttachments.data,
+      onShelfSetCakeEnabled,
+      onStopCake,
+      runningCakeId,
+    ],
+  );
+
+  const composerCakes: ComposerCakesModel | null = useMemo(
+    () =>
+      cakeEntries.length === 0
+        ? null
+        : {
+            entries: cakeEntries,
+            cakes: cakeCatalog.data ?? [],
+            // The same model the shelf used to carry. Run now, stop and the
+            // lock are instructions about a thread, and this picker is the
+            // surface that is standing in one.
+            shelf: cakeShelf,
+            onSetCakeEnabled: (cakeId: string, enabled: boolean) => {
+              void onSetCakeEnabled(cakeId, enabled);
+            },
+            onStopCake,
+          },
+    [cakeCatalog.data, cakeEntries, cakeShelf, onSetCakeEnabled, onStopCake],
+  );
+
+  const askedCake = useMemo(
+    () =>
+      cakeDropAsk === null
+        ? null
+        : ((cakeCatalog.data ?? []).find((cake) => cake.id === cakeDropAsk.cakeId) ?? null),
+    [cakeCatalog.data, cakeDropAsk],
+  );
+
+  /**
+   * The answer that loses nothing: the running turn is left alone and the cake
+   * starts in a thread of its own, on the same branch and worktree.
+   */
+  const forkThreadForCake = useCallback(async () => {
+    if (
+      cakeDropAsk === null ||
+      cakeDropAsk.kind !== "ask" ||
+      askedCake === null ||
+      !activeThread ||
+      !activeProject
+    ) {
+      return;
+    }
+    const modelSelection =
+      composerRef.current?.getSendContext()?.selectedModelSelection ??
+      activeThread.modelSelection ??
+      null;
+    if (modelSelection === null) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not fork a thread for the cake",
+          description: "This thread has no model selected yet.",
+        }),
+      );
+      return;
+    }
+    setCakeDropAsk(null);
+    const nextThreadId = newThreadId();
+    const createResult = await createThread({
+      environmentId,
+      input: {
+        threadId: nextThreadId,
+        projectId: activeProject.id,
+        title: truncate(forkedCakeThreadTitle(askedCake.name, activeThread.title ?? "")),
+        modelSelection,
+        runtimeMode,
+        interactionMode: "default",
+        branch: activeThreadBranch,
+        worktreePath: activeThread.worktreePath,
+        createdAt: DateTime.formatIso(DateTime.nowUnsafe()),
+      },
+    });
+    if (reportCakeFailure("Could not fork a thread for the cake", createResult)) return;
+    // A thread created a moment ago for this cake alone. There is no session to
+    // end, and asking for one would stop a session the fork never started.
+    if (
+      !(await attachCakeToThread(cakeDropAsk.cakeId, nextThreadId, {
+        run: true,
+        endSessionFirst: false,
+      }))
+    ) {
+      return;
+    }
+    await navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: activeThread.environmentId, threadId: nextThreadId },
+    });
+  }, [
+    activeProject,
+    activeThread,
+    activeThreadBranch,
+    askedCake,
+    attachCakeToThread,
+    cakeDropAsk,
+    composerRef,
+    createThread,
+    environmentId,
+    navigate,
+    reportCakeFailure,
+    runtimeMode,
+  ]);
+
+  /**
+   * "Stop the current agent, and spawn the cake" — one instruction, sequenced
+   * on the server.
+   *
+   * There is no client-side interrupt here on purpose. Two stops travelling
+   * separately is the race this answer used to lose: the interrupt and the run
+   * were dispatched back to back, the turn's pending row was written and then
+   * wiped by the teardown landing behind it, and the run came out permanently
+   * unlinked from its turn — `cakes.activeForThread` answered null and "Stop
+   * Cake" never lit. `endSessionFirst` hands the whole ordering to the server,
+   * which waits for the session to actually reach "stopped" before starting the
+   * turn. The server-side stop tears the provider session down, so the agent
+   * stops either way; adding an interrupt back would only reintroduce a second,
+   * unordered stop that can land on the cake's own new turn and kill the run the
+   * user just asked for.
+   */
+  const stopAndSpawnCake = useCallback(async () => {
+    if (cakeDropAsk === null || cakeDropAsk.kind !== "ask") return;
+    const { cakeId, threadId } = cakeDropAsk;
+    setCakeDropAsk(null);
+    await attachCakeToThread(cakeId, threadId, { run: true, endSessionFirst: true });
+  }, [attachCakeToThread, cakeDropAsk]);
+
+  const startCakeOnFreshThread = useCallback(async () => {
+    if (cakeDropAsk === null || cakeDropAsk.kind !== "ask-start") return;
+    const { cakeId, threadId } = cakeDropAsk;
+    setCakeDropAsk(null);
+    await attachCakeToThread(cakeId, threadId, { run: true, endSessionFirst: false });
+  }, [attachCakeToThread, cakeDropAsk]);
+
   const getModelDisabledReason = useCallback(
     (instanceId: ProviderInstanceId, model: string): string | null => {
       if (!activeThread) {
@@ -6569,6 +6997,8 @@ function ChatViewContent(props: ChatViewProps) {
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
       />
+    ) : activeRightPanelSurface?.kind === "cakes" ? (
+      <CakesPanel environmentId={activeThreadRef?.environmentId ?? null} />
     ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
       activeProject &&
       activeWorkspaceRoot ? (
@@ -6660,13 +7090,23 @@ function ChatViewContent(props: ChatViewProps) {
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
-          <div
+          <CakeDropSurface
             className="relative flex min-h-0 min-w-0 flex-1 flex-col"
             data-chat-workspace-drop-target="true"
-            onDragEnter={workspaceFileDropHandlers.onDragEnter}
-            onDragOver={workspaceFileDropHandlers.onDragOver}
-            onDragLeave={workspaceFileDropHandlers.onDragLeave}
-            onDrop={workspaceFileDropHandlers.onDrop}
+            dragActive={isCakeDragActive}
+            handlers={cakeDropHandlers}
+            onDragEnter={(event) => {
+              workspaceFileDropHandlers.onDragEnter(event);
+            }}
+            onDragOver={(event) => {
+              workspaceFileDropHandlers.onDragOver(event);
+            }}
+            onDragLeave={(event) => {
+              workspaceFileDropHandlers.onDragLeave(event);
+            }}
+            onDrop={(event) => {
+              workspaceFileDropHandlers.onDrop(event);
+            }}
           >
             {isWorkspaceFileDragActive ? (
               <div
@@ -6848,6 +7288,8 @@ function ChatViewContent(props: ChatViewProps) {
                             activeTaskSteps={activeComposerTaskSteps}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
+                            cakes={composerCakes}
+                            cakeDropHandlers={cakeDropHandlers}
                             lockedProvider={lockedProvider}
                             providerStatuses={providerStatuses as ServerProvider[]}
                             activeProjectDefaultModelSelection={
@@ -6992,7 +7434,7 @@ function ChatViewContent(props: ChatViewProps) {
                 onPrepared={handlePreparedPullRequestThread}
               />
             ) : null}
-          </div>
+          </CakeDropSurface>
           {/* end chat column */}
         </div>
         {/* end horizontal flex container */}
@@ -7040,12 +7482,14 @@ function ChatViewContent(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddAgents={addAgentsSurface}
+          onAddCakes={addCakesSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           agentsAvailable
+          cakesAvailable
           pullRequestStatuses={pullRequestTabStatuses}
           liveAgentCount={agentPanelModel.liveCount}
         >
@@ -7080,18 +7524,46 @@ function ChatViewContent(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddAgents={addAgentsSurface}
+            onAddCakes={addCakesSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             agentsAvailable
+            cakesAvailable
             pullRequestStatuses={pullRequestTabStatuses}
             liveAgentCount={agentPanelModel.liveCount}
           >
             {rightPanelContent}
           </RightPanelTabs>
         </RightPanelSheet>
+      ) : null}
+
+      {cakeDropAsk !== null && askedCake !== null ? (
+        cakeDropAsk.kind === "ask-start" ? (
+          <CakeDropDialog
+            open
+            kind="start"
+            cake={askedCake}
+            onStart={() => void startCakeOnFreshThread()}
+            onOpenChange={(open) => {
+              if (!open) setCakeDropAsk(null);
+            }}
+          />
+        ) : (
+          <CakeDropDialog
+            open
+            kind="busy"
+            cake={askedCake}
+            threadTitle={activeThread.title ?? ""}
+            onFork={() => void forkThreadForCake()}
+            onStopAndSpawn={() => void stopAndSpawnCake()}
+            onOpenChange={(open) => {
+              if (!open) setCakeDropAsk(null);
+            }}
+          />
+        )
       ) : null}
 
       {expandedImage && (

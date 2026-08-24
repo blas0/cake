@@ -108,6 +108,8 @@ import { ProviderModelPicker } from "./ProviderModelPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
+import { ComposerCakesSelect, type ComposerCakesModel } from "./ComposerCakeControls";
+import type { CakeDropHandlers } from "../cakes/cakeDropHandlers";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
@@ -344,6 +346,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  /** Null when no cake is attached to this thread; the controls stay off the footer. */
+  cakes: ComposerCakesModel | null;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
@@ -428,6 +432,13 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
       </Tooltip>
 
       {interactionModeToggle}
+
+      {props.cakes === null ? null : (
+        <>
+          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+          <ComposerCakesSelect model={props.cakes} />
+        </>
+      )}
     </>
   );
 });
@@ -598,6 +609,19 @@ export interface ChatComposerProps {
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
 
+  /**
+   * Cakes attached to this thread, or null when none are. Derived by the
+   * parent from `cakes.listForThread`; see `cakes/cakeThreadModel.ts` for what
+   * "attached", "scheduled" and "running" mean here.
+   */
+  cakes: ComposerCakesModel | null;
+  /**
+   * The composer is the second drop target for a dragged cake. The handlers are
+   * built by the parent so both targets share one decision path; the composer
+   * only adds its own drag highlight.
+   */
+  cakeDropHandlers: CakeDropHandlers;
+
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
   providerStatuses: ServerProvider[];
@@ -693,6 +717,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeTaskSteps,
     runtimeMode,
     interactionMode,
+    cakes,
+    cakeDropHandlers,
     lockedProvider,
     providerStatuses,
     activeProjectDefaultModelSelection,
@@ -2679,6 +2705,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     window.addEventListener("dragend", onWindowDragEnd);
     return () => window.removeEventListener("dragend", onWindowDragEnd);
   }, [isDragOverComposer]);
+  // The footer's cake controls appear only for a thread that actually has one
+  // attached. An empty picker on every other thread would be a permanent
+  // control for a feature most threads never use.
+  const cakesModel = cakes !== null && cakes.entries.length > 0 ? cakes : null;
+
   const handleInterruptPrimaryAction = useCallback(() => {
     void onInterrupt();
   }, [onInterrupt]);
@@ -2892,10 +2923,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onBlurCapture={() => {
         scheduleComposerCollapseCheck();
       }}
-      onDragEnterCapture={composerMentionDragHandlers.onDragEnter}
-      onDragOverCapture={composerMentionDragHandlers.onDragOver}
-      onDragLeaveCapture={onComposerMentionDragLeaveCapture}
-      onDropCapture={composerMentionDragHandlers.onDrop}
+      // Two readers on one drop surface. A cake and a file mention are told
+      // apart by MIME type, so each handler ignores the other's drags; running
+      // both is what lets a cake dropped anywhere on the composer attach,
+      // without taking the mention drop away from the text it lands on.
+      onDragEnterCapture={(event) => {
+        cakeDropHandlers.onDragEnter(event);
+        composerMentionDragHandlers.onDragEnter(event);
+      }}
+      onDragOverCapture={(event) => {
+        cakeDropHandlers.onDragOver(event);
+        composerMentionDragHandlers.onDragOver(event);
+      }}
+      onDragLeaveCapture={(event) => {
+        cakeDropHandlers.onDragLeave(event);
+        onComposerMentionDragLeaveCapture(event);
+      }}
+      onDropCapture={(event) => {
+        cakeDropHandlers.onDrop(event);
+        composerMentionDragHandlers.onDrop(event);
+      }}
       className={cn("mx-auto w-full min-w-0 max-w-3xl", hasShoulderTab && "pt-7")}
       data-chat-composer-form="true"
     >
@@ -3445,6 +3492,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       runtimeMode={runtimeMode}
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       traitsMenuContent={providerTraitsMenuContent}
+                      cakes={cakesModel}
                       onToggleInteractionMode={toggleInteractionMode}
                       onRuntimeModeChange={handleRuntimeModeChange}
                     />
@@ -3465,6 +3513,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         }
                         interactionMode={interactionMode}
                         runtimeMode={runtimeMode}
+                        cakes={cakesModel}
                         onToggleInteractionMode={toggleInteractionMode}
                         onRuntimeModeChange={handleRuntimeModeChange}
                       />
