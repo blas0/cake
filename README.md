@@ -10,6 +10,20 @@ Nothing. We built T3 Code because we wanted the best possible development experi
 
 We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
 
+## About this Cake fork
+
+This fork adds Cakes to T3 Code. A Cake is a saved agent loop with its own harness, model, effort level, schedule, and `CAKE.md` instructions. Create it once, keep it in the Cakes panel, and drag it onto a thread when you want it to run. Scheduled Cakes run unattended at full permission, so review their instructions before enabling a schedule.
+
+![Create a Cake with a harness, model, schedule, and repeatable instructions](./docs/cakes/product-shots/01-create-a-cake.png)
+
+The Cakes panel keeps saved loops beside the active thread.
+
+![The Cakes panel with saved agent loops](./docs/cakes/product-shots/02-cake-shelf.png)
+
+Drag a Cake onto a thread to start that loop with the thread's existing context.
+
+![Dragging a Cake onto an active thread](./docs/cakes/product-shots/03-drag-to-run.png)
+
 ## Installation
 
 > [!WARNING]
