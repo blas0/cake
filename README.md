@@ -1,6 +1,12 @@
 # t3code/cake-fork
 
-This fork adds Cakes to T3 Code. A Cake is a saved agent loop with its own harness, model, effort level, schedule, and `CAKE.md` instructions. Create it once, keep it in the Cakes panel, and drag it onto a thread when you want it to run. Scheduled Cakes run unattended at full permission, so review their instructions before enabling a schedule.
+This fork adds Cakes to T3 Code. 
+
+A Cake is a proofed agent loop defined/scoped to its own harness, model, effort level, schedule, and `CAKE.md` instructions.
+
+Create it once, keep it in the Cakes panel, and drag it onto a thread when you want it to run. 
+
+Scheduled Cakes run unattended at full permission, so review their instructions before enabling a schedule.
 
 <div align=center>
 
