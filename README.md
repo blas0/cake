@@ -24,60 +24,35 @@ Drag a Cake onto a thread to start that loop with the thread's existing context.
 
 ![Dragging a Cake onto an active thread](./docs/cakes/product-shots/03-drag-to-run.png)
 
-## Installation
+## Install Cake from source
 
-> [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, Grok Build and OpenCode. Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
-> - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+> [!IMPORTANT]
+> Cake does not publish an npm package or desktop binary yet. `npx t3@latest`, the upstream T3 Code releases, and the T3 Code packages in Winget, Homebrew, and AUR do not include Cakes.
 
-### Try it out (install-free)
-
-The easiest way to test T3 Code is to run the server in your terminal (requires Node.js 22.16+, 23.11+, or 24.10+):
+The current source runner requires macOS or Linux with Bash and Git. Install the [Vite+ CLI](https://viteplus.dev/guide/) first. Vite+ manages the project's Node.js runtime and package manager.
 
 ```bash
-npx t3@latest
+curl -fsSL https://vite.plus | bash
 ```
 
-This will launch T3 Code's backend on your machine as well as the local web app to control your agents.
-
-Tip: Use `npx t3@latest --help` for the full CLI reference.
-
-### Desktop app
-
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
-
-#### Windows (`winget`)
+Then clone and run Cake:
 
 ```bash
-winget install T3Tools.T3Code
+git clone https://github.com/blas0/cake.git
+cd cake
+vp install
+./scripts/cake-dev.sh
 ```
 
-#### macOS (Homebrew)
+The Cake launcher stores its runtime state under the repository's `.t3` directory. It does not read or modify an installed T3 Code application's `~/.t3` data.
 
-```bash
-brew install --cask t3-code
-```
+Cake supports Codex, Claude, Cursor, Grok Build, and OpenCode. Install and authenticate at least one provider before starting Cake:
 
-#### Arch Linux (AUR)
-
-Stable:
-
-```bash
-yay -S t3code-bin
-```
-
-Nightly:
-
-```bash
-yay -S t3code-nightly-bin
-```
-
-The AUR packaging is maintained in this repository under [`packaging/aur`](./packaging/aur).
+- Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
+- Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
+- Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
+- Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
+- OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 
 ## Some notes
 
