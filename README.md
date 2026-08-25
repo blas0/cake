@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/cakes/cakes.png" alt="Cakes logo" width="480">
+</p>
+
 # t3code/cake-fork
 
 This fork adds Cakes to T3 Code. 
