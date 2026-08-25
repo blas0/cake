@@ -1,33 +1,28 @@
-# T3 Code
-
-T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
-
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, and OpenCode. If they're set up on your computer, T3 Code can control them.
-
-## "Wait, what are you selling me?"
-
-Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
-
-We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
-
-## About this Cake fork
+# t3code/cake-fork
 
 This fork adds Cakes to T3 Code. A Cake is a saved agent loop with its own harness, model, effort level, schedule, and `CAKE.md` instructions. Create it once, keep it in the Cakes panel, and drag it onto a thread when you want it to run. Scheduled Cakes run unattended at full permission, so review their instructions before enabling a schedule.
 
-![Create a Cake with a harness, model, schedule, and repeatable instructions](./docs/cakes/product-shots/01-create-a-cake.png)
+<div align=center>
 
-The Cakes panel keeps saved loops beside the active thread.
+| Access Cakes, and their configuration via the right sidebar |
+| - |
+| <img src="./docs/cakes/product-shots/02-cake-shelf.png" alt="The Cakes panel with saved agent loops" width="600"> |
 
-![The Cakes panel with saved agent loops](./docs/cakes/product-shots/02-cake-shelf.png)
+| Create Cakes scoped to the work, not the project |
+| - |
+| <img src="./docs/cakes/product-shots/01-create-a-cake.png" alt="Create a Cake with a harness, model, schedule, and repeatable instructions" width="600"> |
 
-Drag a Cake onto a thread to start that loop with the thread's existing context.
+| Drag and drop a Cake to start the loop, manage within prompt input |
+| - |
+<img src="./docs/cakes/product-shots/03-drag-to-run.png" alt="Dragging a Cake onto an active thread" width="600"> |
 
-![Dragging a Cake onto an active thread](./docs/cakes/product-shots/03-drag-to-run.png)
+</div>
 
 ## Install Cake from source
 
-> [!IMPORTANT]
-> Cake does not publish an npm package or desktop binary yet. `npx t3@latest`, the upstream T3 Code releases, and the T3 Code packages in Winget, Homebrew, and AUR do not include Cakes.
+> [!WARNING]
+> Cake will never publish an npm package or desktop binary.
+> `npx t3@latest`, the upstream T3 Code releases, and the T3 Code packages in Winget, Homebrew, and AUR do not include Cakes.
 
 The current source runner requires macOS or Linux with Bash and Git. Install the [Vite+ CLI](https://viteplus.dev/guide/) first. Vite+ manages the project's Node.js runtime and package manager.
 
@@ -44,66 +39,18 @@ vp install
 ./scripts/cake-dev.sh
 ```
 
-The Cake launcher stores its runtime state under the repository's `.t3` directory. It does not read or modify an installed T3 Code application's `~/.t3` data.
+The Cake launcher stores its runtime state under the repository's `.t3` directory. 
 
-Cake supports Codex, Claude, Cursor, Grok Build, and OpenCode. Install and authenticate at least one provider before starting Cake:
+It does not read or modify an installed T3 Code application's `~/.t3` data.
 
-- Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-- Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-- Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
-- Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
-- OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+Cake supports Codex, Claude, Cursor, Grok Build, and OpenCode.
 
-## Some notes
+Authenticate as you would through t3code.
 
-We are very very early in this project. Expect bugs.
+---
 
-We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
+<div align=center>
 
-## Documentation
+If you do not have t3code, follow the authoring repo page: [pingdotgg/t3code](https://github.com/pingdotgg/t3code)
 
-Full docs live in [docs/](./docs). There's no docs site yet.
-
-- [Install and first run](./docs/user/install.md)
-- [Permission modes](./docs/user/permission-modes.md)
-- [Keyboard shortcuts](./docs/user/keybindings.md)
-- [Customize a project icon](./docs/user/project-settings.md)
-- [Remote access from a phone or another machine](./docs/user/remote-access.md)
-- [Keeping app and server in sync](./docs/user/updating.md)
-- [Source control integrations](./docs/user/source-control.md)
-- Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
-- Linux: [run T3 Code as a background service](./docs/user/background-service.md)
-
-Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
-
-## If you REALLY want to contribute still.... read this first
-
-### Install `vp`
-
-T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
-
-#### macOS / Linux
-
-```bash
-curl -fsSL https://vite.plus | bash
-```
-
-#### Windows
-
-```bash
-irm https://vite.plus/ps1 | iex
-```
-
-Checkout their getting started guide for more information: https://viteplus.dev/guide/
-
-### Install dependencies
-
-```bash
-vp i
-```
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
-
-Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
-
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+</div>
